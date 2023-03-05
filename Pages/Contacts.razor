@@ -1,0 +1,93 @@
+﻿@using System.Net.Http
+@using Contacts_Frontend.Models
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+
+@page "/contacts"
+
+<PageTitle>Contacts</PageTitle>
+
+<h1>Contacts</h1>
+
+@if (contacts == null)
+{
+    <p>Loading</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>
+                    Name
+                </th>
+                <th>
+                    Surname
+                </th>
+                <th>
+                    E-mail
+                </th>
+                <th>
+                    Category
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var contact in contacts!)
+            {
+                <tr>
+                    <td>@contact.Name</td>
+                    <td>@contact.Surname</td>
+                    <td>@contact.Email</td>
+                    <td>@contact.Category!.Name</td>
+                    <AuthorizeView>
+                        <Authorized>
+                            <td>
+                                <button type="button" @onclick=@(() =>
+                            NavigationManager.NavigateTo($"/editcontact/{contact.ContactId}"))>Edit
+                                </button>
+                            </td>
+                            <td>
+                                @* <button type="button" @onclick=@(() => DeleteClick(wordGroup)) data-bs-toggle="modal"
+                        data-bs-target="#deleteWordModal">@Loc["Delete"]</button> *@
+                            </td>
+                        </Authorized>
+                        <NotAuthorized>
+                        </NotAuthorized>
+                    </AuthorizeView>
+
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div>
+        @* <button type="button" class="btn btn-primary btn-sm" @onclick="ShowModal">@Loc["WordGroupsCreateNew"]</button> *@
+    </div>
+}
+
+@code {
+    private List<Contact>? contacts { get; set; }
+    protected override async Task OnInitializedAsync()
+    {
+        await GetContacts();
+    }
+
+    private async Task GetContacts()
+    {
+        string request = "https://localhost:7141" + "/contacts/getallcontacts";
+        var response = await Http.GetAsync(request);
+        if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+        {
+            Console.WriteLine(response.StatusCode);
+            return;
+        }
+        else if (!response.IsSuccessStatusCode)
+        {
+            Console.WriteLine(response.StatusCode);
+            return;
+        }
+
+        var reponseData = await response.Content.ReadFromJsonAsync<List<Contact>>();
+        contacts = reponseData!;
+    }
+}
