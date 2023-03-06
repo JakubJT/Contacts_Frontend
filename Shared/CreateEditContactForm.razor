@@ -1,0 +1,275 @@
+@using System.Net.Http
+@using Models
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
+@using System.Text.Json
+@using System.Text
+@attribute [Authorize]
+@inject IAccessTokenProvider _tokenProvider
+@inject HttpClient Http
+@inject IConfiguration Configuration
+@inject NavigationManager NavigationManager
+
+<div>
+    <EditForm Model="@ContactToSubmit" OnValidSubmit="@OnSubmit">
+        <DataAnnotationsValidator />
+        <p>
+            <label>
+                Imię
+                <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit!.Name" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.Name" />
+        </p>
+        <p>
+            <label>
+                Nazwisko
+                <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit.Surname" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.Surname" />
+        </p>
+        <p>
+            <label>
+                E-mail
+                <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit.Email" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.Email" />
+        </p>
+        <p>
+            <label>
+                Hasło
+                <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit.Password" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.Password" />
+        </p>
+        <p>
+            <label>
+                Telefon
+                <InputText type="tel" minlenght=9 maxlength=9 @bind-Value="ContactToSubmit.PhoneNumber" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.PhoneNumber" />
+        </p>
+        <p>
+            <label>
+                Data urodzenia
+                <InputDate minlength=1 maxlength=16 @bind-Value="ContactToSubmit.DateOfBirth" />
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.DateOfBirth" />
+        </p>
+        <p>
+            <label>
+                Kategoria
+                <InputSelect @ref="selectComponent" @bind-Value="ContactToSubmit.CategoryId">
+                    <option value="">Wybierz kategorię</option>
+                    @foreach (var category in CategoriesList)
+                    {
+                        <option value="@category.CategoryId">@category.Name</option>
+                    }
+                </InputSelect>
+            </label>
+            <ValidationMessage For="() => ContactToSubmit.CategoryId" />
+        </p>
+        @if (CheckSubcategoriesAvailability(selectComponent.Value) ||
+        CheckSubcategoriesAvailability(ContactToSubmit.CategoryId))
+        {
+            <p>
+                <label>
+                    Podkategoria
+                    <InputSelect @bind-Value="ContactToSubmit.Subcategory.SubcategoryId">
+                        <option value="">Wybierz podkategorię</option>
+                        @foreach (var subcategory in SubcategoriesList)
+                        {
+                            <option value="@subcategory.SubcategoryId">@subcategory.Name</option>
+                        }
+                    </InputSelect>
+                </label>
+                <ValidationMessage For="() => ContactToSubmit.Subcategory.SubcategoryId" />
+            </p>
+        }
+        else if
+        (CheckIfEditableSubcategory(selectComponent.Value) || CheckIfEditableSubcategory(ContactToSubmit.CategoryId))
+        {
+            <p>
+                <label>
+                    Wpisz własną podkategorię
+                    <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit.Subcategory.Name" />
+                </label>
+                <ValidationMessage For="() => ContactToSubmit.Subcategory.Name" />
+            </p>
+        }
+        <button type="submit">Zapisz</button>
+    </EditForm>
+</div>
+@if (ErrorMessage != null)
+{
+    <div>@ErrorMessage</div>
+}
+
+
+@code {
+
+    [Parameter]
+    public string? ContactId { get; set; }
+    private Contact? ContactToSubmit { get; set; } = new();
+    private string? ErrorMessage { get; set; }
+    private string EndpointUrl = "https://localhost:7141";
+    private List<Category>? CategoriesList { get; set; } = new();
+    private List<Subcategory> SubcategoriesList { get; set; } = new();
+    private InputSelect<int>? selectComponent = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await GetCategoriesList();
+        await GetSubcategoriesList();
+
+        string request;
+        if (ContactId == null) return;
+        else request = $"/contacts/getcontactbyid?contactId={ContactId}";
+
+        var requestMessage = await GetHttpRequestMessage(HttpMethod.Get, EndpointUrl + request);
+        var getResponse = await Http.SendAsync(requestMessage);
+        if (getResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            ErrorMessage = "GetContactById request returned status code: " + getResponse.StatusCode.ToString();
+            return;
+        }
+        else if (!getResponse.IsSuccessStatusCode)
+        {
+            ErrorMessage = "GetContactById request returned status code: " + getResponse.StatusCode.ToString();
+            return;
+        }
+        ContactToSubmit = await getResponse.Content.ReadFromJsonAsync<Contact>();
+    }
+
+    private bool CheckSubcategoriesAvailability(int categoryId)
+    {
+        var filteredSubcategories = SubcategoriesList.Where(s => s.CategoryId == categoryId).ToList();
+        if (filteredSubcategories.Count == 0) return false;
+        SubcategoriesList = filteredSubcategories;
+        if (ContactToSubmit.Subcategory is null) ContactToSubmit.Subcategory = new();
+        return true;
+    }
+
+    private bool CheckIfEditableSubcategory(int categoryId)
+    {
+        var category = CategoriesList
+        .Where(c => c.CategoryId == categoryId && c.IsAddingSubcategoryPossible == true)
+        .FirstOrDefault();
+
+        if (category is null) return false;
+        if (ContactToSubmit.Subcategory is null) ContactToSubmit.Subcategory = new();
+        return true;
+    }
+
+    private async Task GetCategoriesList()
+    {
+        string request = $"/category/getallcategories";
+
+        var response = await Http.GetAsync(EndpointUrl + request);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            ErrorMessage = "GetCategoriesList request returned status code: " + response.StatusCode.ToString();
+            return;
+        }
+        else if (!response.IsSuccessStatusCode)
+        {
+            ErrorMessage = "GetCategoriesList request returned status code: " + response.StatusCode.ToString();
+            return;
+        }
+        CategoriesList = await response.Content.ReadFromJsonAsync<List<Category>>();
+    }
+    private async Task GetSubcategoriesList()
+    {
+        string request = $"/subcategory/getalldefaultsubcategories";
+
+        var response = await Http.GetAsync(EndpointUrl + request);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            ErrorMessage = "GetSubcategoriesList request returned status code: " + response.StatusCode.ToString();
+            return;
+        }
+        else if (!response.IsSuccessStatusCode)
+        {
+            ErrorMessage = "GetSubcategoriesList request returned status code: " + response.StatusCode.ToString();
+            return;
+        }
+        SubcategoriesList = await response.Content.ReadFromJsonAsync<List<Subcategory>>();
+    }
+    public async Task OnSubmit()
+    {
+        ErrorMessage = null;
+        SetProperValuesToSubcategory();
+
+        string requestUri;
+        if (ContactId == null) requestUri = EndpointUrl + $"/contacts/createcontact";
+        else requestUri = EndpointUrl + $"/contacts/editcontact";
+
+        var requestMessage = await GetHttpRequestMessage(HttpMethod.Post, requestUri);
+        string jsonPostRequest = JsonSerializer.Serialize(ContactToSubmit);
+        requestMessage.Content = new StringContent(jsonPostRequest, Encoding.UTF8, "application/json");
+        var response = await Http.SendAsync(requestMessage);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            ErrorMessage = "EditContact request returned status code: " + response.StatusCode.ToString();
+            return;
+        }
+        else if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            ErrorMessage = $"Email {ContactToSubmit.Email} nie jest unikalny";
+            return;
+        }
+        else if (!response.IsSuccessStatusCode)
+        {
+            if (ContactId == null)
+            {
+                ErrorMessage = "CreateContact request returned status code:" + response.StatusCode;
+            }
+            else
+            {
+                ErrorMessage = "EditContact request returned status code:" + response.StatusCode;
+            }
+            return;
+        }
+        NavigationManager.NavigateTo("contacts", true);
+    }
+
+    private void SetProperValuesToSubcategory()
+    {
+        var category = CategoriesList.Where(c => c.CategoryId == ContactToSubmit.CategoryId).FirstOrDefault();
+        if (category.IsAddingSubcategoryPossible)
+        {
+            ContactToSubmit.Subcategory.CategoryId = ContactToSubmit.CategoryId;
+            ContactToSubmit.Subcategory.IsDefaultSubcategory = false;
+        }
+        else if (category.DoesHaveSubcategories == false)
+        {
+            ContactToSubmit.Subcategory = null;
+        }
+        else
+        {
+            ContactToSubmit.Subcategory.CategoryId = ContactToSubmit.CategoryId;
+            ContactToSubmit.Subcategory.Name = SubcategoriesList
+            .Where(s => s.SubcategoryId == ContactToSubmit.Subcategory.SubcategoryId)
+            .First().Name;
+            ContactToSubmit.Subcategory.IsDefaultSubcategory = true;
+        }
+    }
+
+    public async Task<HttpRequestMessage> GetHttpRequestMessage(HttpMethod httpMethod, string requestUri)
+    {
+        var requestMessage = new HttpRequestMessage(httpMethod, requestUri);
+        System.Net.Http.Headers.AuthenticationHeaderValue? authorization = new("Bearer", await GetToken());
+        requestMessage.Headers.Authorization = authorization;
+        return requestMessage;
+    }
+
+    private async Task<string> GetToken()
+    {
+        AccessToken accessToken;
+        var token = await _tokenProvider.RequestAccessToken();
+        token.TryGetToken(out accessToken);
+        return accessToken.Value;
+    }
+
+}
+

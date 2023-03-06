@@ -1,0 +1,11 @@
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+
+@page "/editcontact/{ContactId}"
+
+<CreateEditContactForm ContactId="@ContactId"></CreateEditContactForm>
+
+@code {
+    [Parameter]
+    public string? ContactId { get; set; }
+}
