@@ -4,6 +4,7 @@ namespace Contacts_Frontend.Models;
 
 public class Contact
 {
+    private const string ValidationPassword = "Hasło musi się składać z conajmniej 6 znaków, w tym 1 duże litery, jednej małe, cyfry, znaku specjalnego(za wyjątkiem spacji)";
     public int ContactId { get; set; }
 
     [Required]
@@ -20,7 +21,7 @@ public class Contact
     public string? Email { get; set; }
 
     [StringLength(15, MinimumLength = 6)]
-    [RegularExpression(@"(?=(.*\d)+)(?=(.*\W)+)(?=(.*[A-Z])+)(?=(.*[a-z])+)")]
+    [RegularExpression(@"(?=.*\d)(?=.*\W)(?=.*[a-z])(?=.*[A-Z])\S+", ErrorMessage = ValidationPassword)]
     public string? Password { get; set; }
 
     [Phone]
@@ -32,5 +33,6 @@ public class Contact
 
     [Required]
     public int CategoryId { get; set; }
+
     public Subcategory? Subcategory { get; set; }
 }

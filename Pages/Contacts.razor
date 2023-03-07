@@ -1,7 +1,12 @@
 ﻿@using System.Net.Http
-@using Contacts_Frontend.Models
+@using Models
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication;
+@inject IAccessTokenProvider _tokenProvider
 @inject HttpClient Http
 @inject NavigationManager NavigationManager
+@inject DialogService DialogService
+@inject RequestMessageGenerator RequestMessageGenerator
+@inject IConfiguration Configuration
 
 @page "/contacts"
 
@@ -18,18 +23,10 @@ else
     <table class="table">
         <thead>
             <tr>
-                <th>
-                    Imię
-                </th>
-                <th>
-                    Nazwisko
-                </th>
-                <th>
-                    E-mail
-                </th>
-                <th>
-                    Kategoria
-                </th>
+                <th>Imię</th>
+                <th>Nazwisko</th>
+                <th>E-mail</th>
+                <th>Kategoria</th>
             </tr>
         </thead>
         <tbody>
@@ -43,17 +40,14 @@ else
                     <AuthorizeView>
                         <Authorized>
                             <td>
-                                <button type="button" @onclick=@(() =>
-                            NavigationManager.NavigateTo($"/editcontact/{contact.ContactId}"))>Edytuj
-                                </button>
+                                <RadzenButton Click=@(() => NavigationManager.NavigateTo($"/editcontact/{contact.ContactId}"))
+                            Text="Edytuj" ButtonStyle="ButtonStyle.Primary" />
                             </td>
                             <td>
-                                @* <button type="button" @onclick=@(() => DeleteClick(wordGroup)) data-bs-toggle="modal"
-                        data-bs-target="#deleteWordModal">@Loc["Delete"]</button> *@
+                                <RadzenButton Click=@(() => ShowDeleteDialog(contact)) Text="Usuń"
+                            ButtonStyle="ButtonStyle.Danger" />
                             </td>
                         </Authorized>
-                        <NotAuthorized>
-                        </NotAuthorized>
                     </AuthorizeView>
 
                 </tr>
@@ -61,21 +55,31 @@ else
         </tbody>
     </table>
     <div>
-        @* <button type="button" class="btn btn-primary btn-sm" @onclick="ShowModal">@Loc["WordGroupsCreateNew"]</button> *@
+        <AuthorizeView>
+            <Authorized>
+                <RadzenButton Click=@(() => NavigationManager.NavigateTo($"/createcontact")) Text="Dodaj nowy"
+                ButtonStyle="ButtonStyle.Primary" />
+            </Authorized>
+        </AuthorizeView>
     </div>
 }
 
 @code {
     private List<ContactBaseInformation>? contacts { get; set; }
+    private ContactBaseInformation? contactToDelete;
+    private string EndpointUrl;
+
     protected override async Task OnInitializedAsync()
     {
+        EndpointUrl = Configuration.GetSection("EndpointUrl").Value;
         await GetContacts();
     }
 
     private async Task GetContacts()
     {
-        string request = "https://localhost:7141" + "/contacts/getallcontacts";
+        string request = EndpointUrl + "/contacts/getallcontacts";
         var response = await Http.GetAsync(request);
+        //Very smimple error handling
         if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
         {
             Console.WriteLine(response.StatusCode);
@@ -89,5 +93,41 @@ else
 
         var reponseData = await response.Content.ReadFromJsonAsync<List<ContactBaseInformation>>();
         contacts = reponseData!;
+    }
+
+    async Task ShowDeleteDialog(ContactBaseInformation contact)
+    {
+        var result = await DialogService.OpenAsync("Usuwanie kontaktu", ds =>
+    @<div>
+        <p class="mb-4">Usunąć kontakt <b>@contact.Surname @contact.Name</b>?</p>
+        <div class="row">
+            <div class="col">
+                <RadzenButton Text="Tak" Click="() => ds.Close(true)" class="me-1" Style="width: 80px;" />
+                <RadzenButton Text="Nie" Click="() => ds.Close(false)" ButtonStyle="ButtonStyle.Light" class="me-1" />
+            </div>
+        </div>
+    </div>, new DialogOptions() { CloseDialogOnOverlayClick = true });
+        contactToDelete = contact;
+        if (result == true) await DeleteContact();
+    }
+
+    public async Task DeleteContact()
+    {
+        string requestUri = EndpointUrl + $"/contacts/deletecontact?contactId={contactToDelete!.ContactId}";
+        var requestMessage = await RequestMessageGenerator.GetHttpRequestMessage(HttpMethod.Delete, requestUri);
+        var deleteResponse = await Http.SendAsync(requestMessage);
+        //Very smimple error handling
+        if (deleteResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            Console.WriteLine("DeleteWord request returned status code: " + deleteResponse.StatusCode.ToString());
+            return;
+        }
+        else if (!deleteResponse.IsSuccessStatusCode)
+        {
+            Console.WriteLine("DeleteWord request returned status code: " + deleteResponse.StatusCode.ToString());
+            return;
+        }
+        await GetContacts();
+
     }
 }

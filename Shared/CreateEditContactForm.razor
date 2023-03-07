@@ -9,6 +9,8 @@
 @inject HttpClient Http
 @inject IConfiguration Configuration
 @inject NavigationManager NavigationManager
+@inject RequestMessageGenerator RequestMessageGenerator
+@inject IConfiguration Configuration
 
 <div>
     <EditForm Model="@ContactToSubmit" OnValidSubmit="@OnSubmit">
@@ -59,7 +61,6 @@
             <label>
                 Kategoria
                 <InputSelect @ref="selectComponent" @bind-Value="ContactToSubmit.CategoryId">
-                    <option value="">Wybierz kategorię</option>
                     @foreach (var category in CategoriesList)
                     {
                         <option value="@category.CategoryId">@category.Name</option>
@@ -68,14 +69,12 @@
             </label>
             <ValidationMessage For="() => ContactToSubmit.CategoryId" />
         </p>
-        @if (CheckSubcategoriesAvailability(selectComponent.Value) ||
-        CheckSubcategoriesAvailability(ContactToSubmit.CategoryId))
+        @if (CheckSubcategoriesAvailability(selectComponent.Value))
         {
             <p>
                 <label>
                     Podkategoria
                     <InputSelect @bind-Value="ContactToSubmit.Subcategory.SubcategoryId">
-                        <option value="">Wybierz podkategorię</option>
                         @foreach (var subcategory in SubcategoriesList)
                         {
                             <option value="@subcategory.SubcategoryId">@subcategory.Name</option>
@@ -86,17 +85,18 @@
             </p>
         }
         else if
-        (CheckIfEditableSubcategory(selectComponent.Value) || CheckIfEditableSubcategory(ContactToSubmit.CategoryId))
+        (CheckIfEditableSubcategory(ContactToSubmit.CategoryId, false) ||
+        CheckIfEditableSubcategory(selectComponent.Value))
         {
             <p>
                 <label>
                     Wpisz własną podkategorię
-                    <InputText minlength=1 maxlength=16 @bind-Value="ContactToSubmit.Subcategory.Name" />
+                    <InputText minlength=3 maxlength=10 @bind-Value="ContactToSubmit.Subcategory.Name" />
                 </label>
                 <ValidationMessage For="() => ContactToSubmit.Subcategory.Name" />
             </p>
         }
-        <button type="submit">Zapisz</button>
+        <RadzenButton ButtonType="ButtonType.Submit" Text="Zapisz" ButtonStyle="ButtonStyle.Primary" />
     </EditForm>
 </div>
 @if (ErrorMessage != null)
@@ -111,22 +111,33 @@
     public string? ContactId { get; set; }
     private Contact? ContactToSubmit { get; set; } = new();
     private string? ErrorMessage { get; set; }
-    private string EndpointUrl = "https://localhost:7141";
+    private string? EndpointUrl;
     private List<Category>? CategoriesList { get; set; } = new();
     private List<Subcategory> SubcategoriesList { get; set; } = new();
     private InputSelect<int>? selectComponent = new();
+    private bool SubcategoryFieldVisible { get; set; } = false;
+    private bool FirstUsageOfCheckSubcategoriesAvailability { get; set; } = true;
+    private int OldSelectComponentValue;
 
     protected override async Task OnInitializedAsync()
     {
+        EndpointUrl = Configuration.GetSection("EndpointUrl").Value;
         await GetCategoriesList();
         await GetSubcategoriesList();
-
         string request;
-        if (ContactId == null) return;
-        else request = $"/contacts/getcontactbyid?contactId={ContactId}";
 
-        var requestMessage = await GetHttpRequestMessage(HttpMethod.Get, EndpointUrl + request);
+        //Checking if it is edit form or create form. If ConctactId isn't provide it is create form.
+        if (ContactId == null)
+        {
+            ContactToSubmit.CategoryId = CategoriesList.First().CategoryId;
+            ContactToSubmit.Name = "";
+            return;
+        }
+        //If it is edit form, app fetches contact data from server using backend
+        else request = $"/contacts/getcontactbyid?contactId={ContactId}";
+        var requestMessage = await RequestMessageGenerator.GetHttpRequestMessage(HttpMethod.Get, EndpointUrl + request);
         var getResponse = await Http.SendAsync(requestMessage);
+        //Very simple error handling
         if (getResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
             ErrorMessage = "GetContactById request returned status code: " + getResponse.StatusCode.ToString();
@@ -140,23 +151,65 @@
         ContactToSubmit = await getResponse.Content.ReadFromJsonAsync<Contact>();
     }
 
+    //Method checks whether to show the field with subcategories
+    //and if yes, it sets the appropriate values in the fields
     private bool CheckSubcategoriesAvailability(int categoryId)
     {
+        if (ContactToSubmit.Name == null) return false;
+        if (selectComponent.Value != ContactToSubmit.CategoryId)
+        {
+            selectComponent.Value = ContactToSubmit.CategoryId;
+            categoryId = selectComponent.Value;
+        }
+
+        if (selectComponent.Value == OldSelectComponentValue && SubcategoryFieldVisible) return true;
+        OldSelectComponentValue = selectComponent.Value;
+
+        Console.WriteLine(selectComponent.Value);
+
         var filteredSubcategories = SubcategoriesList.Where(s => s.CategoryId == categoryId).ToList();
-        if (filteredSubcategories.Count == 0) return false;
+        if (filteredSubcategories.Count == 0)
+        {
+            SubcategoryFieldVisible = false;
+            return false;
+        };
         SubcategoriesList = filteredSubcategories;
-        if (ContactToSubmit.Subcategory is null) ContactToSubmit.Subcategory = new();
+
+        //First shown of the subcategory select in edit form
+        if (FirstUsageOfCheckSubcategoriesAvailability && ContactId != null)
+        {
+            SubcategoryFieldVisible = true;
+            FirstUsageOfCheckSubcategoriesAvailability = false;
+            return true;
+        }
+        //Category change from private to businesses and first shown
+        //of subcategory in create form
+        else if (ContactToSubmit.Subcategory is null)
+        {
+            ContactToSubmit.Subcategory = new() { Name = filteredSubcategories.First().Name };
+            ContactToSubmit.Subcategory.SubcategoryId = filteredSubcategories.First().CategoryId;
+        }
+        //Category change from other to businesses
+        else if (SubcategoryFieldVisible == false)
+        {
+            ContactToSubmit.Subcategory.Name = filteredSubcategories.First().Name;
+            ContactToSubmit.Subcategory.SubcategoryId = filteredSubcategories.First().CategoryId;
+        }
+        SubcategoryFieldVisible = true;
         return true;
     }
 
-    private bool CheckIfEditableSubcategory(int categoryId)
+    //Method checks whether to show field with input where user can provide own subcategory
+    //and if yes, it sets the appropriate values in the fields
+    private bool CheckIfEditableSubcategory(int categoryId, bool onCategoryChange = true)
     {
         var category = CategoriesList
         .Where(c => c.CategoryId == categoryId && c.IsAddingSubcategoryPossible == true)
         .FirstOrDefault();
-
         if (category is null) return false;
-        if (ContactToSubmit.Subcategory is null) ContactToSubmit.Subcategory = new();
+
+        if (ContactToSubmit.Subcategory is null) ContactToSubmit.Subcategory = new() { Name = "" };
+        else if (onCategoryChange) ContactToSubmit.Subcategory.Name = "";
         return true;
     }
 
@@ -197,13 +250,14 @@
     public async Task OnSubmit()
     {
         ErrorMessage = null;
-        SetProperValuesToSubcategory();
+        bool noValidationError = SetProperValuesToSubcategory();
+        if (noValidationError == false) return;
 
         string requestUri;
         if (ContactId == null) requestUri = EndpointUrl + $"/contacts/createcontact";
         else requestUri = EndpointUrl + $"/contacts/editcontact";
 
-        var requestMessage = await GetHttpRequestMessage(HttpMethod.Post, requestUri);
+        var requestMessage = await RequestMessageGenerator.GetHttpRequestMessage(HttpMethod.Post, requestUri);
         string jsonPostRequest = JsonSerializer.Serialize(ContactToSubmit);
         requestMessage.Content = new StringContent(jsonPostRequest, Encoding.UTF8, "application/json");
         var response = await Http.SendAsync(requestMessage);
@@ -233,11 +287,16 @@
         NavigationManager.NavigateTo("contacts", true);
     }
 
-    private void SetProperValuesToSubcategory()
+    private bool SetProperValuesToSubcategory()
     {
         var category = CategoriesList.Where(c => c.CategoryId == ContactToSubmit.CategoryId).FirstOrDefault();
         if (category.IsAddingSubcategoryPossible)
         {
+            if (ContactToSubmit.Subcategory?.Name == "")
+            {
+                ErrorMessage = "Nazwa podkategorii nie może być pusta";
+                return false;
+            }
             ContactToSubmit.Subcategory.CategoryId = ContactToSubmit.CategoryId;
             ContactToSubmit.Subcategory.IsDefaultSubcategory = false;
         }
@@ -253,23 +312,7 @@
             .First().Name;
             ContactToSubmit.Subcategory.IsDefaultSubcategory = true;
         }
+        return true;
     }
-
-    public async Task<HttpRequestMessage> GetHttpRequestMessage(HttpMethod httpMethod, string requestUri)
-    {
-        var requestMessage = new HttpRequestMessage(httpMethod, requestUri);
-        System.Net.Http.Headers.AuthenticationHeaderValue? authorization = new("Bearer", await GetToken());
-        requestMessage.Headers.Authorization = authorization;
-        return requestMessage;
-    }
-
-    private async Task<string> GetToken()
-    {
-        AccessToken accessToken;
-        var token = await _tokenProvider.RequestAccessToken();
-        token.TryGetToken(out accessToken);
-        return accessToken.Value;
-    }
-
 }
 
